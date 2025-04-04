@@ -1,0 +1,232 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2761
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 import pandas as pd\
+import yfinance as yf\
+import numpy as np\
+import matplotlib.pyplot as plt\
+import statsmodels.api as sm\
+from datetime import datetime\
+from dateutil.relativedelta import relativedelta\
+import talib\
+# ====================\
+# \uc0\u29992 \u25142 \u33258 \u23450 \u32681 \u21443 \u25976 \u21312 \
+# ====================\
+#START_DATE = "2010-01-01"     # \uc0\u22238 \u28204 \u36215 \u22987 \u26085 \u26399 \
+START_DATE = "1999-06-01"     # QQQ \uc0\u19978 \u24066 \u26085 \
+END_DATE = "2025-03-22"       # \uc0\u22238 \u28204 \u32080 \u26463 \u26085 \u26399 \
+INITIAL_CAPITAL = 10000       # \uc0\u21021 \u22987 \u36039 \u37329 \
+COMMISSION = 0.005            # \uc0\u21934 \u27425 \u20132 \u26131 \u20323 \u37329 \u29575 \u65288 0.01%\u65289 + slippage \
+SMA_PERIOD = 150           # \uc0\u22343 \u32218 \u36913 \u26399 \u65288 \u40664 \u35469  200 \u26085 \u65289 \
+TARGET_LEVERAGE = 3       # \uc0\u30446 \u27161 \u27091 \u26751 \u20493 \u25976 \u65288 2~3\u20043 \u38291 \u65289 \
+QLD_SYMBOL = "QLD"            # 2x \uc0\u27091 \u26751  ETF \u20195 \u30908 \
+TQQQ_SYMBOL = "TQQQ"          # 3x \uc0\u27091 \u26751  ETF \u20195 \u30908 \
+SAFE_ASSET = "SHY"            # \uc0\u36991 \u38570 \u36039 \u29986 \u20195 \u30908 \u65288 \u21487 \u25563 \u28858  "SHY"\u65288 \u30701 \u20661 \u65289 \u12289 "GLD"\u65288 \u40643 \u37329 \u65289 \u12289 "CASH"\u65288 \u29694 \u37329 \u65289 \u31561 \
+DAILY_LEVERAGE_3 = 3            # \uc0\u27169 \u25836 \u27091 \u26751 \u20493 \u25976 \
+DAILY_LEVERAGE_2 = 2            # \uc0\u27169 \u25836 \u27091 \u26751 \u20493 \u25976 \
+MANAGEMENT_FEE = 0.0075       # \uc0\u24180 \u24230 \u31649 \u29702 \u36027 \u65288 TQQQ \u23526 \u38555 \u24180 \u36027  0.95%\u65289 - dividend 0.2%\
+ORI_DISCOUNT =  0.8           # pessimistic estimation of total return\
+daily_fee = (1 + MANAGEMENT_FEE) ** (1 / 252) - 1\
+# ====================\
+\
+def download_data():\
+    """Download and simulate TQQQ / QLD / Safe Asset data."""\
+    # Download QQQ price\
+    cls = yf.download("QQQ", start=START_DATE, end=END_DATE, auto_adjust=True)\
+    qqq_price = cls["Close"]\
+    qqq_price.name = "QQQ"  # Assign a unique name\
+     \
+    vix_cls = yf.download("^VIX", start=START_DATE, end=END_DATE, auto_adjust=True)\
+    vix     = vix_cls["Close"]\
+    vix.name = "VIX"\
+    \
+    if SAFE_ASSET == "CASH":\
+        safe_price = pd.Series(1, index=qqq_price.index, name="CASH")\
+    else:\
+        safe_price = yf.download(SAFE_ASSET, start=START_DATE, end=END_DATE, auto_adjust=True)["Close"]\
+        safe_price.name = SAFE_ASSET\
+    \
+    \
+    \
+    df = pd.concat([qqq_price, safe_price, vix], axis=1).dropna()\
+    df["QQQ_OPEN"]= cls["Open"]\
+    # Print column names to verify uniqueness\
+    print("Downloaded data with columns:")\
+    print(df.columns)\
+    # Calculate daily returns\
+    df["qqq_returns"] = df["QQQ"].pct_change().dropna()\
+\
+    # Simulate leveraged ETF returns\
+\
+    # Concatenate into a single DataFrame\
+    #df = pd.concat([qqq_price, tqqq_price, qld_price, safe_price], axis=1).dropna()\
+    \
+    \
+\
+    # Ensure column names are unique\
+    assert df.columns.is_unique, "Duplicate column names detected!"\
+\
+    return df\
+\
+\
+\
+def backtest_strategy(df):\
+    # \uc0\u39511 \u35657 \u30446 \u27161 \u27091 \u26751 \u26377 \u25928 \u24615 \
+    if not (1 <= TARGET_LEVERAGE <= 10):\
+        raise ValueError("\uc0\u27091 \u26751 \u20493 \u25976 \u24517 \u38920 \u22312  1~10 \u20043 \u38291 \u65281 ")\
+    \
+\
+    # | (df["^VIX"]>50)\
+    # \uc0\u35336 \u31639  QQQ \u30340  SMA200\
+    #df["QQQ_SMA"] = df["QQQ"].rolling(SMA_PERIOD).mean()\
+    df["QQQ_SMA"] = talib.MA(df["QQQ"], timeperiod=SMA_PERIOD)  # matype=1 \uc0\u34920 \u31034 SMMA\
+    # \uc0\u29983 \u25104 \u20132 \u26131 \u20449 \u34399 \u65288 1=\u27091 \u26751 \u32068 \u21512 , -1=\u36991 \u38570 \u36039 \u29986 \u65289 \
+    #df["Signal"] = np.where(df["QQQ"] > df["QQQ_SMA"], 1, -1)\
+    # \uc0\u29983 \u25104 \u20449 \u21495 \u65288 \u20462 \u22797 \u36923 \u36753 \u23884 \u22871 \u65289 \
+    df["Raw_Signal"] = np.select(\
+        condlist=[\
+            (df["QQQ"] > 1.01 * df["QQQ_SMA"]) | (df["^VIX"]<21)  | (df["^VIX"]>60) ,  # \uc0\u26465 \u20214 1\u65306 \u39640 \u20110 1%\u38408 \u20540 \
+            ((df["QQQ"] < 0.99 * df["QQQ_SMA"]) ) &  (df["^VIX"]<60) & (df["^VIX"]>22)  # \uc0\u26465 \u20214 2\u65306 \u20302 \u20110 1%\u38408 \u20540 \
+        ],\
+        choicelist=[\
+            1,   # \uc0\u28385 \u36275 \u26465 \u20214 1\u26102 \u20449 \u21495 \u20026 1\u65288 \u26464 \u26438 \u65289 \
+            -1   # \uc0\u28385 \u36275 \u26465 \u20214 2\u26102 \u20449 \u21495 \u20026 -1\u65288 \u36991 \u38505 \u65289 \
+        ],\
+        default=np.nan  # \uc0\u20013 \u38388 \u21306 \u22495 \u19981 \u25913 \u21464 \u20449 \u21495 \
+    )\
+    df["Signal"] = df["Raw_Signal"].ffill().fillna(-1)  # \uc0\u21069 \u21521 \u22635 \u20805 \u20013 \u38388 \u21306 \u22495 \
+    \
+    # \uc0\u36991 \u20813 \u22312 \u21021 \u22987  SMA \u35336 \u31639 \u26399 \u21069 \u20132 \u26131 \
+    #df = df.iloc[SMA_PERIOD:]\
+    \
+    # \uc0\u35336 \u31639 \u21508 \u36039 \u29986 \u25910 \u30410 \u29575 \
+    df[f"\{QLD_SYMBOL\}_Return"] =  df["QQQ"].pct_change()* DAILY_LEVERAGE_2  #df[QLD_SYMBOL].pct_change()\
+    df[f"\{TQQQ_SYMBOL\}_Return"] = df["QQQ"].pct_change()* DAILY_LEVERAGE_3\
+    df[f"\{SAFE_ASSET\}_Return"] =  df[SAFE_ASSET].pct_change().fillna(0)  # \uc0\u36991 \u38570 \u36039 \u29986 \
+    \
+    # \uc0\u21205 \u24907 \u32068 \u21512 \u25910 \u30410 \u29575 \u65288 \u21152 \u27402 \u27091 \u26751 \u25110 \u36991 \u38570 \u65289 \
+    df["Leveraged_Return"] = TARGET_LEVERAGE * df["QQQ"].pct_change() - daily_fee\
+    df["Open_Next_Day"] = df["QQQ_OPEN"].shift(-1)  # Next day's open price\
+    df["Open_Return"] = (df["QQQ"] / df["QQQ_OPEN"] - 1) * TARGET_LEVERAGE - daily_fee\
+    \
+    df["Signal_Change"] = df["Signal"].diff().abs()\
+    df["Trade_Day"] = df["Signal_Change"].shift(1).eq(2).astype(int)\
+    \
+    \
+    \
+    df["Strategy_Return"] = np.where(\
+        df["Signal"].shift(1) == 1,  # If we were in QQQ yesterday\
+        np.where(\
+            df["Trade_Day"] == 1,    # If trading today  \
+            df["Open_Return"],       # Use open-to-close return\
+            df["Leveraged_Return"]   # Else use normal close-to-close\
+        ),\
+        0 #df[f"\{SAFE_ASSET\}_Return"]            # If we were in safe asset\
+    )\
+    \
+    \
+    df["Strategy_Return"] -= df["Trade_Day"] * COMMISSION *2 \
+    \
+    # \uc0\u35336 \u31639 \u28136 \u20540 \u26354 \u32218 \
+    df["Strategy_NAV"] = (1 + df["Strategy_Return"]).cumprod() * INITIAL_CAPITAL\
+    df["BuyHold_QQQ"] = (1 + df["QQQ"].pct_change()).cumprod() * INITIAL_CAPITAL\
+    df["BuyHold_QLD"] = (1 + 2*df["QQQ"].pct_change()).cumprod() * INITIAL_CAPITAL\
+    df["BuyHold_TQQQ"] = (1 + 3*df["QQQ"].pct_change()).cumprod() * INITIAL_CAPITAL\
+    df["BuyHold_Safe"] = (1 + df[f"\{SAFE_ASSET\}_Return"]).cumprod() * INITIAL_CAPITAL\
+    \
+    return df\
+\
+def calculate_sharpe_ratio(df, risk_free_rate=0.01):\
+    # Calculate excess returns\
+    excess_returns = df["Strategy_Return"] - risk_free_rate / 252\
+    # Annualize the Sharpe ratio\
+    annual_sharpe_ratio = (excess_returns.mean() / excess_returns.std()) * np.sqrt(252)\
+    return annual_sharpe_ratio\
+\
+def calculate_jensens_alpha(df, years, strategy_cagr, market_cagr ,risk_free_rate=0.01):\
+    # Excess returns\
+    # \uc0\u26032 \u22686  Alpha \u35745 \u31639 \u37096 \u20998 \
+    # \uc0\u33719 \u21462 \u31574 \u30053 \u21644 \u24066 \u22330 \u30340 \u26085 \u25910 \u30410 \u29575 \
+    strategy_returns = df["Strategy_Return"].dropna()\
+    market_returns = df["QQQ"].pct_change().dropna()\
+    \
+    # \uc0\u23545 \u40784 \u25968 \u25454 \u32034 \u24341 \
+    common_idx = strategy_returns.index.intersection(market_returns.index)\
+    strategy_returns = strategy_returns.loc[common_idx]\
+    market_returns = market_returns.loc[common_idx]\
+    \
+    # \uc0\u35745 \u31639  Beta\
+    covariance = np.cov(strategy_returns, market_returns)[0][1]\
+    market_variance = np.var(market_returns)\
+    beta = covariance / market_variance\
+    \
+    \
+\
+    \
+    # \uc0\u35745 \u31639  Alpha\
+    alpha = strategy_cagr - (risk_free_rate + beta*(market_cagr - risk_free_rate))\
+    return alpha\
+def max_drawdown_fn(df_s):\
+    nav_series = df_s\
+    peak = nav_series.expanding().max()\
+    drawdown = (nav_series - peak)/peak\
+    return drawdown.min()\
+def analyze_results(df):\
+    final_nav = df["Strategy_NAV"].iloc[-1]* ORI_DISCOUNT\
+    bh_qqq = df["BuyHold_QQQ"].iloc[-1]\
+    bh_safe = df["BuyHold_Safe"].iloc[-1]\
+    \
+    \
+    date1 = datetime.strptime(START_DATE, "%Y-%m-%d")\
+    date2 = datetime.strptime(END_DATE, "%Y-%m-%d")\
+\
+\
+    difference_in_days = (date2 - date1).days\
+\
+\
+    years = difference_in_days / 365.2425\
+   \
+\
+    strategy_cagr = (final_nav/INITIAL_CAPITAL)**(1/years) - 1\
+    \
+    \
+    \
+    max_drawdown = max_drawdown_fn(df["Strategy_NAV"])\
+    max_drawdown_qqq = max_drawdown_fn(df["BuyHold_QQQ"])\
+    # \uc0\u35745 \u31639 \u24066 \u22330 \u24180 \u21270 \u25910 \u30410 \u29575 \
+    market_cagr = (df["BuyHold_QQQ"].iloc[-1]/INITIAL_CAPITAL)**(1/years) - 1\
+    alpha = calculate_jensens_alpha( df, years, strategy_cagr, market_cagr,0.02)\
+    annual_turnover = df["Trade_Day"].sum() / years\
+    \
+    print(f"\\n\uc0\u31574 \u30053 \u21443 \u25976 \u65306 \{TARGET_LEVERAGE\}\u20493 \u27091 \u26751 \u32068 \u21512  + \u36991 \u38570 \u36039 \u29986  [\{SAFE_ASSET\}]")\
+    print("="*50)\
+    print(f"\uc0\u31574 \u30053 \u26368 \u32066 \u28136 \u20540 : $\{final_nav:,.2f\}")\
+    print(f"\uc0\u24180 \u21270 \u25442 \u25163 \u29575 : \{annual_turnover:.1f\} \u27425 ")\
+    print(f"strategy\uc0\u24180 \u21270 \u25910 \u30410 \u29575 : \{strategy_cagr*100:.2f\}%")\
+    print(f"market(qqq)\uc0\u24180 \u21270 \u25910 \u30410 \u29575 : \{market_cagr*100:.2f\}%")\
+    print(f"strategy\uc0\u26368 \u22823 \u22238 \u25764 : \{max_drawdown*100:.2f\}%")\
+    print(f"qqq max draw down \{max_drawdown_qqq*100:.2f\}%")\
+    print(f"\uc0\u36023 \u20837 \u25345 \u26377  QQQ \u28136 \u20540 : $\{bh_qqq:,.2f\}")\
+    print(f"\uc0\u36023 \u20837 \u25345 \u26377  \{SAFE_ASSET\} \u28136 \u20540 : $\{bh_safe:,.2f\}")\
+    print(f"Annualized Jensen's Alpha: \{alpha:.2f\}")\
+    plt.figure(figsize=(12,6))\
+    plt.plot(df["Strategy_NAV"], label=f"\uc0\u31574 \u30053  (\{TARGET_LEVERAGE\}x Leverage + \{SAFE_ASSET\})")\
+    plt.plot(df["BuyHold_QQQ"], label="Buy & Hold QQQ", linestyle="--", alpha=0.7)\
+    plt.plot(df["BuyHold_Safe"], label=f"Buy & Hold \{SAFE_ASSET\}", linestyle="--", alpha=0.7)\
+    plt.plot(df["BuyHold_TQQQ"], label="Buy & Hold TQQQ", linestyle="--", alpha=0.7)\
+    plt.plot(df["BuyHold_QLD"], label="Buy & Hold QLD", linestyle="--", alpha=0.7)\
+    plt.title(f"\uc0\u21205 \u24907 \u27091 \u26751 \u31574 \u30053  vs \u36023 \u20837 \u25345 \u26377  (\u36991 \u38570 \u36039 \u29986 : \{SAFE_ASSET\})")\
+    plt.legend()\
+    plt.show()\
+\
+\
+\
+\
+if __name__ == "__main__":\
+    data = download_data()\
+    results = backtest_strategy(data)\
+    analyze_results(results)}

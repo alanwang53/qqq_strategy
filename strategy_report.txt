@@ -1,0 +1,37 @@
+
+    Strategy Performance Report
+    ===========================
+    Period: 2005-03-09 to 2025-04-03
+    Trading Days: 5051 (20.07 years)
+    
+    Return Statistics
+    -----------------
+    Total Return: 160085.23%
+    CAGR: 44.44%
+    Annualized Volatility: 40.18%
+    Win Rate: 55.8%
+    
+    Risk Metrics
+    ------------
+    Max Drawdown: -47.41%
+    MDD Duration: 30 days, FROM 2020-02-19 00:00:00->2020-03-20 00:00:00
+    Sharpe Ratio: 0.99
+    Calmar Ratio: 0.94
+    
+    CAPM Analysis
+    -------------
+    Alpha_daily: 0.0010 (p-value: 0.0000)
+    Alpha annulize: 0.2691)
+    Beta: 1.38
+    
+    Significance Tests
+    ------------------
+    Strategy Return > risk_free: Confirmed
+    (p-value: 0.0000)
+    Strategy Return > mkt_daily return: Confirmed
+    (p-value: 0.0002)
+    Strategy Return > mkt_daily 2x return: Confirmed
+    (p-value: 0.0193)
+    Strategy Return > mkt_daily 3x return: Rejected
+    (p-value: 0.2737)
+    
